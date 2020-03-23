@@ -5,21 +5,13 @@ import torch.nn as nn
 from torch import optim
 import math
 import mf
+import fm
 
 
-class FMCE(nn.Module):
+class FMCE(fm.FM):
 
     def __init__(self, x_dim, u_dim, num_factors):
-        super(FMCE, self).__init__()
-        self.x_dim = x_dim
-        self.u_dim = u_dim
-        self.num_factors = num_factors
-        self.linear = nn.Linear(self.x_dim + self.u_dim, 1, bias=True)
-        self.V = nn.Parameter(torch.Tensor(self.x_dim + self.u_dim, self.num_factors))
-        k = self.x_dim + self.u_dim  # alternative: k = self.num_factors.
-        bound = 1 /  math.sqrt(k)
-        nn.init.uniform_(self.V, -bound, bound)
-
+        super(FMCE, self).__init__(x_dim, u_dim, num_factors)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x, u):
@@ -150,5 +142,3 @@ def test():
     )
 
     job.run()
-
-test()

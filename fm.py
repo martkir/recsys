@@ -60,5 +60,3 @@ def test():
     )
 
     job.run()
-
-test()
