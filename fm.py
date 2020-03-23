@@ -1,0 +1,374 @@
+import os
+import shutil
+from collections import defaultdict, OrderedDict
+
+import torch
+import torch.nn as nn
+from torch import optim
+from tqdm import tqdm
+import numpy as np
+import wget
+from zipfile import ZipFile
+import pandas as pd
+import random
+
+
+class BatchDotProduct(nn.Module):
+
+    def __init__(self):
+        super(BatchDotProduct, self).__init__()
+
+    def forward(self, x, y):
+        x = x.unsqueeze(1)  # (b, 1, k).
+        y = y.unsqueeze(2)  # (b, k, 1).
+        scores = torch.bmm(x, y)  # (b, 1, 1).
+        scores = scores.reshape(x.shape[0], 1)
+        return scores
+
+
+class FM(nn.Module):
+
+    def __init__(self, x_dim, u_dim, num_factors):
+        super(FM, self).__init__()
+        self.x_dim = x_dim
+        self.u_dim = u_dim
+        self.num_factors = num_factors
+        self.item_embedder = nn.Linear(x_dim, num_factors)
+        self.user_embedder = nn.Linear(u_dim, num_factors)
+        self.batch_dot = BatchDotProduct()
+
+    def forward(self, x, u):
+        x_embed = self.item_embedder(x)  # (b, k).
+        u_embed = self.user_embedder(u)  # (b, k).
+        scores_inter = self.batch_dot(u_embed, x_embed)  # (b, 1).
+        scores = scores_inter
+        return scores
+
+
+class MovieLens100k(object):
+    def __init__(self, dir_path):
+        """Class that parses data into correct format (for downstream components)
+
+        Args:
+            dir_path(:obj:`string`): The path to the data folder.
+        """
+
+        self.dir_path = dir_path
+        self.raw_dir_path = os.path.join(self.dir_path, 'raw_data/ml-100k')
+        self.rs_dir_path = os.path.join(self.dir_path, 'rs_data/ml-100k')
+        self.raw_data_path = os.path.join(self.raw_dir_path, 'ml-100k.zip')
+        self.rels = []
+
+        if not os.path.isdir(self.raw_dir_path):
+            os.makedirs(self.raw_dir_path)
+            wget.download(
+                url='http://files.grouplens.org/datasets/movielens/ml-100k.zip',
+                out=self.raw_data_path
+            )
+
+        if not os.path.isdir(self.rs_dir_path):
+            os.makedirs(self.rs_dir_path)
+            self.create()
+
+        rels_df = pd.read_csv(os.path.join(self.rs_dir_path, 'rels.csv'))
+        rels_dict = rels_df.to_dict(orient='list')
+
+        for user_id, item_id, rel in zip(rels_dict['user_id'], rels_dict['item_id'], rels_dict['rel']):
+            self.rels.append((user_id, item_id, rel))
+
+    def create(self):
+        rels_dict = {'user_id': [], 'item_id': [], 'rel': []}
+
+        with ZipFile(self.raw_data_path, mode='r') as archive:
+            archive.printdir()
+            for line in archive.open('ml-100k/u.data'):
+                record = line.decode('utf-8').split('\t')
+
+                user_id = int(record[0])
+                item_id = int(record[1])
+                rel = int(record[2])
+                rels_dict['user_id'].append(user_id)
+                rels_dict['item_id'].append(item_id)
+                rels_dict['rel'].append(rel)
+
+        df = pd.DataFrame(rels_dict)
+        df.to_csv(os.path.join(self.rs_dir_path, 'rels.csv'), index=False, mode='w')
+
+
+class Partition(object):
+    def __init__(self, rels, dataset_type, split_prob, shuffle, seed=0):
+        self.rels = rels
+        self.dataset_type = dataset_type
+        self.split_prob = split_prob
+        self.shuffle = shuffle
+        self.seed = seed
+        if self.shuffle:
+            random.seed(self.seed)
+            random.shuffle(self.rels)
+
+        split_point = int(len(self.rels) * self.split_prob)
+        if self.dataset_type == 'train':
+            self.rels = self.rels[:split_point]
+        elif self.dataset_type == 'valid':
+            self.rels = self.rels[split_point:]
+        else:
+            raise ValueError('Invalid dataset type {}. Accepted values are train, valid.'.format(dataset_type))
+
+        self.user_ids = set()
+        self.item_ids = set()
+
+        for user_id, item_id, _ in self.rels:
+            self.user_ids.add(user_id)
+            self.item_ids.add(item_id)
+
+    def update(self, user_ids, item_ids):
+        self.user_ids = user_ids
+        self.item_ids = item_ids
+
+        i = 0
+        while True:
+            user_id, item_id, _ = self.rels[i]
+            if user_id not in self.user_ids:
+                del self.rels[i]
+                i -= 1
+            elif item_id not in self.item_ids:
+                del self.rels[i]
+                i -= 1
+            i += 1
+            if i == len(self.rels):
+                break
+
+
+class UserItemSampler(object):
+    def __init__(self, rels, user_ids, item_ids, device):
+        self.rels = iter(rels)
+
+        self.user_ids = user_ids
+        self.item_ids = item_ids
+        self.device = device
+
+        self.uid2idx = {user_id: i for i, user_id in enumerate(self.user_ids)}
+        self.xid2idx = {item_id: i for i, item_id in enumerate(self.item_ids)}
+        self.num_users = len(self.user_ids)
+        self.num_items = len(self.item_ids)
+        self._size = len(rels)
+        self.user_matrix = torch.eye(self.num_users).to(device=self.device)
+        self.item_matrix = torch.eye(self.num_items).to(device=self.device)
+
+    def __len__(self):
+        return self._size
+
+    def batch(self, batch_size=1):
+
+        while True:
+            u = []
+            x = []
+            targets = []
+
+            for _ in range(batch_size):
+                try:
+                    user_id, item_id, rel = next(self.rels)
+                    user_vec = self.user_matrix[self.uid2idx[user_id]].reshape(1, self.user_matrix.shape[1])
+                    item_vec = self.item_matrix[self.xid2idx[item_id]].reshape(1, self.item_matrix.shape[1])
+                    u.append(user_vec)
+                    x.append(item_vec)
+                    targets.append(torch.tensor(rel, dtype=torch.long).reshape(1, 1))
+                except StopIteration:
+                    break
+
+            if len(targets) > 0:
+                u = torch.cat(u, dim=0)
+                x = torch.cat(x, dim=0)
+                targets = torch.cat(targets, dim=0).to(device=self.device)
+                batch = (x, u, targets.flatten())
+                yield batch
+            else:
+                break
+
+
+class TrainEvalJob(object):
+    def __init__(self, job_id, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
+        self.job_id = job_id
+        self.num_factors = num_factors
+        self.lr = lr
+        self.batch_size = batch_size
+        self.num_epochs = num_epochs
+        self.use_gpu = use_gpu
+        self.override = override
+
+        self.job_dir = os.path.join('jobs', '{}'.format(self.job_id))
+        self.checkpoints_dir = os.path.join(self.job_dir, 'checkpoints')
+        self.results_path = os.path.join(self.job_dir, 'results.csv')
+
+        if os.path.isdir(self.job_dir):
+            if self.override:
+                shutil.rmtree(self.job_dir)
+                os.makedirs(self.checkpoints_dir)
+        else:
+            os.makedirs(self.checkpoints_dir)
+
+        self.device = torch.device('cpu')
+        if self.use_gpu:
+            if not torch.cuda.is_available():
+                raise Exception('CUDA capable GPU not available.')
+            else:
+                self.device = torch.device('cuda:{}'.format(0))
+
+        try:
+            print('Job initialized with device {}'.format(torch.cuda.get_device_name(self.device)))
+        except ValueError:
+            print('Job initialized with CPU.')
+
+        """
+        issue: 
+        - all items in the validation set must also be in the training set.
+        - all users in the validation set must also be in the training set.        
+        
+        approach:
+        - in a parition keep list of items and user ids.
+        """
+
+        self.dataset = MovieLens100k(dir_path='data')
+        self.train_partition = Partition(self.dataset.rels, 'train', 0.8, shuffle=True, seed=0)
+        self.valid_partition = Partition(self.dataset.rels, 'valid', 0.8, shuffle=True, seed=0)
+
+        # Ensuring the validation set is a subset of the training set:
+        user_ids_diff = self.train_partition.user_ids - self.valid_partition.user_ids
+        user_ids_diff = user_ids_diff.union(self.train_partition.user_ids.intersection(self.valid_partition.user_ids))
+        item_ids_diff = self.train_partition.item_ids - self.valid_partition.item_ids
+        item_ids_diff = item_ids_diff.union(self.train_partition.item_ids.intersection(self.valid_partition.item_ids))
+        self.valid_partition.update(user_ids_diff, item_ids_diff)
+
+        self.model = FM(
+            x_dim=len(self.train_partition.item_ids),
+            u_dim=len(self.train_partition.user_ids),
+            num_factors=self.num_factors
+        )
+
+        self.model.to(device=self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        self.criterion = nn.MSELoss()
+
+    def train_iter(self, x, u, targets):
+        self.model.train()
+        scores = self.model.forward(x, u)  # (b, 1).
+        loss = self.criterion(scores.flatten(), targets.float())
+        stats = dict()
+        stats['train_loss'] = loss.data.cpu().numpy()
+        stats['train_mse'] = loss.data.cpu().numpy()
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        return stats
+
+    def valid_iter(self, x, u, targets):
+        self.model.eval()
+        scores = self.model.forward(x, u)
+        loss = self.criterion(scores.flatten(), targets.float())
+        stats = dict()
+        stats['valid_loss'] = loss.data.cpu().numpy()
+        stats['valid_mse'] = loss.data.cpu().numpy(),
+        return stats
+
+    def train_epoch(self, current_epoch):
+        batch_train_stats = defaultdict(lambda: [])
+        epoch_train_stats = OrderedDict({})
+
+        self.train_sampler = UserItemSampler(
+            rels=self.train_partition.rels,
+            user_ids=self.train_partition.user_ids,
+            item_ids=self.train_partition.item_ids,
+            device=self.device
+        )
+
+        with tqdm(total=len(self.train_sampler)) as pbar:
+            for i, batch in enumerate(self.train_sampler.batch(self.batch_size)):
+                x, u, targets = batch
+                output = self.train_iter(x, u, targets)
+                for k, v in output.items():
+                    batch_train_stats[k].append(output[k])
+                description = \
+                    'epoch: {} '.format(current_epoch) + \
+                    ' '.join(["{}: {:.4f}".format(k, np.mean(v)) for k, v in batch_train_stats.items()])
+                pbar.update(targets.shape[0])
+                pbar.set_description(description)
+
+        for k, v in batch_train_stats.items():
+            epoch_train_stats[k] = np.around(np.mean(v), decimals=4)
+
+        return epoch_train_stats
+
+    def valid_epoch(self, current_epoch):
+        batch_valid_stats = defaultdict(lambda: [])
+        epoch_valid_stats = OrderedDict({})
+
+        self.valid_sampler = UserItemSampler(
+            rels=self.valid_partition.rels,
+            user_ids=self.train_partition.user_ids,
+            item_ids=self.train_partition.item_ids,
+            device=self.device
+        )
+
+        with tqdm(total=len(self.valid_sampler)) as pbar:
+            for i, batch in enumerate(self.valid_sampler.batch(self.batch_size)):
+                x, u, targets = batch
+                output = self.valid_iter(x, u, targets)
+                for k, v in output.items():
+                    batch_valid_stats[k].append(output[k])
+                description = \
+                    'epoch: {} '.format(current_epoch) + \
+                    ' '.join(["{}: {:.4f}".format(k, np.mean(v)) for k, v in batch_valid_stats.items()])
+                pbar.update(targets.shape[0])
+                pbar.set_description(description)
+
+        for k, v in batch_valid_stats.items():
+            epoch_valid_stats[k] = np.around(np.mean(v), decimals=4)
+
+        return epoch_valid_stats
+
+    def save_epoch_stats(self, epoch_stats):
+        epoch_stats_df = pd.DataFrame.from_dict(epoch_stats)
+        if os.path.exists(self.results_path):
+            stats_df = pd.read_csv(self.results_path)
+            updated_stats_df = pd.concat([stats_df, epoch_stats_df])
+            updated_stats_df.to_csv(self.results_path, index=False, mode='w+')
+        else:
+            epoch_stats_df.to_csv(self.results_path, index=False, mode='w+')
+
+    def save_checkpoint(self, current_epoch):
+        state = dict()
+        state['network'] = self.model.state_dict()
+        state['optimizer'] = self.optimizer.state_dict()
+        checkpoint_path = os.path.join(self.checkpoints_dir, 'epoch_{}.ckpt'.format(current_epoch))
+        torch.save(state, f=checkpoint_path)
+
+    def run(self):
+
+        for current_epoch in range(self.num_epochs):
+            epoch_stats = defaultdict(lambda: [])
+            epoch_train_stats = self.train_epoch(current_epoch)
+            epoch_valid_stats = self.valid_epoch(current_epoch)
+
+            for k in epoch_train_stats.keys():
+                epoch_stats[k] = [epoch_train_stats[k]]
+            for k in epoch_valid_stats.keys():
+                epoch_stats[k] = [epoch_valid_stats[k]]
+            self.save_epoch_stats(epoch_stats)
+            self.save_checkpoint(current_epoch)
+
+
+def test():
+
+    job = TrainEvalJob(
+        job_id=0,
+        num_factors=4,
+        lr=0.01,
+        batch_size=256,
+        num_epochs=5,
+        use_gpu=False,
+        override=False
+    )
+
+    job.run()
+
+test()
