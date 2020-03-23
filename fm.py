@@ -216,7 +216,7 @@ class TrainEvalJob(object):
 
         try:
             print('Job initialized with device {}'.format(torch.cuda.get_device_name(self.device)))
-        except ValueError:
+        except AssertionError:
             print('Job initialized with CPU.')
 
         """
