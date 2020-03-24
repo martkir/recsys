@@ -67,8 +67,8 @@ class UserItemSampler(mf.UserItemSampler):
 
 
 class TrainEvalJob(mf.TrainEvalJob):
-    def __init__(self, job_id, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
-        super(TrainEvalJob, self).__init__(job_id, num_factors, lr, batch_size, num_epochs, use_gpu, override)
+    def __init__(self, index_path, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
+        super(TrainEvalJob, self).__init__(index_path, num_factors, lr, batch_size, num_epochs, use_gpu, override)
 
         self.model = FMCE(
             x_dim=len(self.train_partition.item_ids),
@@ -127,18 +127,3 @@ class TrainEvalJob(mf.TrainEvalJob):
         stats['valid_loss'] = loss.data.cpu().numpy()
         stats['valid_acc'] = self.compute_acc(scores, targets)
         return stats
-
-
-def test():
-
-    job = TrainEvalJob(
-        job_id=1,
-        num_factors=4,
-        lr=0.01,
-        batch_size=256,
-        num_epochs=5,
-        use_gpu=False,
-        override=False
-    )
-
-    job.run()

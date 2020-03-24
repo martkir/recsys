@@ -12,10 +12,10 @@ import numpy as np
 import pandas as pd
 import random
 import datasets
+import json
 
 
 class BatchDotProduct(nn.Module):
-
     def __init__(self):
         super(BatchDotProduct, self).__init__()
 
@@ -28,7 +28,6 @@ class BatchDotProduct(nn.Module):
 
 
 class MF(nn.Module):
-
     def __init__(self, x_dim, u_dim, num_factors):
         super(MF, self).__init__()
         self.x_dim = x_dim
@@ -138,8 +137,8 @@ class UserItemSampler(object):
 
 
 class TrainEvalJob(object):
-    def __init__(self, job_id, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
-        self.job_id = job_id
+    def __init__(self, index_path, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
+        self.index_path = index_path
         self.num_factors = num_factors
         self.lr = lr
         self.batch_size = batch_size
@@ -147,16 +146,28 @@ class TrainEvalJob(object):
         self.use_gpu = use_gpu
         self.override = override
 
+        if os.path.isfile(self.index_path):
+            self.index = json.load(open(self.index_path))
+        else:
+            self.index = {}
+
+        job_id_str = 'model:{} num_factors:{} lr:{} batch_size:{} num_epochs:{}'.\
+            format('mf', self.num_factors, self.lr, self.batch_size, self.num_epochs)
+
+        self.job_id = self.index[job_id_str] if job_id_str in self.index else len(self.index)
         self.job_dir = os.path.join('jobs', '{}'.format(self.job_id))
         self.checkpoints_dir = os.path.join(self.job_dir, 'checkpoints')
         self.results_path = os.path.join(self.job_dir, 'results.csv')
 
-        if os.path.isdir(self.job_dir):
-            if self.override:
-                shutil.rmtree(self.job_dir)
-                os.makedirs(self.checkpoints_dir)
+        if job_id_str in self.index and self.override:
+            shutil.rmtree(self.job_dir)
         else:
-            os.makedirs(self.checkpoints_dir)
+            raise ValueError('Job {} already exists. Rerun job by setting override to TRUE'.format(job_id_str))
+
+        os.makedirs(self.checkpoints_dir)
+
+        # todo: if experiment doesn't finish - you need to have a status variable that says so.
+        # allows unfinished experiments to be overriden.
 
         self.device = torch.device('cpu')
         if self.use_gpu:
@@ -290,6 +301,24 @@ class TrainEvalJob(object):
         checkpoint_path = os.path.join(self.checkpoints_dir, 'epoch_{}.ckpt'.format(current_epoch))
         torch.save(state, f=checkpoint_path)
 
+    def aggregate_stats(self):
+        results_df = pd.read_csv()
+        results_dict = results_df.to_dict(orient='list')
+        i, best_valid_loss = max(results_dict['valid_loss'])
+
+        record = {}
+        record['num_factors'] = [self.num_factors]
+
+        # select column that has maximum value.
+        # todo: add epoch column.
+        # train_loss, train_mse, valid_loss, valid_mse
+        # 2.372999906539917, 2.372999906539917, 0.8859999775886536, 0.8859999775886536
+        # 0.9226999878883362, 0.9226999878883362, 0.8830000162124634, 0.88300001621246
+
+        # best + median etc.
+        # also record data to jobs level (like: model + hyperparams.)
+        pass
+
     def run(self):
 
         for current_epoch in range(self.num_epochs):
@@ -303,6 +332,8 @@ class TrainEvalJob(object):
                 epoch_stats[k] = [epoch_valid_stats[k]]
             self.save_epoch_stats(epoch_stats)
             self.save_checkpoint(current_epoch)
+
+        self.aggregate_stats()
 
 
 def test():
