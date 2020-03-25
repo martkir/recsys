@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import json
-import os
 import click
 from tabulate import tabulate
 
@@ -37,19 +36,15 @@ def get_job_str(job_config):
     return ' '.join(['{}:{}'.format(k, v) for k, v in job_config.items()])
 
 
-def run_jobs():
-    import mf
-
-    job = mf.TrainEvalJob(
-        index_path='jobs/index.json',
-        num_factors=4,
-        lr=0.01,
-        batch_size=256,
-        num_epochs=5,
-        use_gpu=True,
-        override=True
-    )
-    job.run()
+def get_job(job_config):
+    model = job_config['model']
+    job_kwargs = {k: v for k, v in job_config.items() if k != 'model'}
+    if model == 'mf':
+        import mf
+        return mf.TrainEvalJob(**job_kwargs)
+    elif model == 'fm':
+        import fm
+        return fm.TrainEvalJob(**job_kwargs)
 
 
 class EvalHist(object):
@@ -70,6 +65,8 @@ class EvalHist(object):
     def save(self, hist_path):
         plt.hist(self.vals, bins=self.bins)
         plt.savefig(hist_path)
+        print('Finished creating histogram. Saved at {}'.format(hist_path))
+
 
 
 class EvalTable(object):
@@ -79,38 +76,36 @@ class EvalTable(object):
         self.metric = metric
         self.index_path = index_path
         self.schema = json.load(open(self.schema_path, 'r'))
-        self.index = json.load(open(self.index_path, 'r'))
-        self.filter_schema()  # remove jobs that can't be evaluated.
+        try:
+            self.index = json.load(open(self.index_path, 'r'))
+        except FileNotFoundError:
+            self.index = {}
+        self.check()
         self.table = None
 
-    def filter_schema(self):
-        if not os.path.isfile(self.index_path):
-            raise FileNotFoundError('Index {} does not exist. Run a job to create it.'.format(self.index_path))
-        new_schema = {}
+    def check(self):
         missing_jobs = []
-        present_jobs = []
         for model in self.schema.keys():
             for job_config in self.schema[model]['job_configs']:
                 job_config_str = ' '.join(['{}:{}'.format(k, v) for k, v in job_config.items()])
-                if job_config_str in self.index:
-                    present_jobs.append(job_config_str)
-                    if model not in new_schema:
-                        new_schema[model] = {}
-                        new_schema[model]['job_configs'] = []
-                        new_schema[model]['metrics'] = self.schema[model]['metrics']
-                    new_schema[model]['job_configs'].append(job_config)
+                if job_config_str not in self.index:
+                    missing_jobs.append(job_config)
+
+        if len(missing_jobs) > 0:
+            print('Table cannot be created. The results of the following jobs are missing: ')
+            print(json.dumps(missing_jobs, indent=4))
+            while True:
+                ans = input('Run all of the above jobs? [y/n] ')
+                if ans not in ['y', 'n']:
+                    print('Input {} is not a valid response.'.format(ans))
                 else:
-                    missing_jobs.append(job_config_str)
-        self.schema = new_schema
-        print('Present jobs:')
-        for job_str in present_jobs:
-            print(job_str)
-
-        # just ask to run these jobs in order to continue.
-
-        print('Missing jobs:')
-        for job_str in missing_jobs:
-            print(job_str)
+                    break
+            if ans == 'y':
+                for job_config in missing_jobs:
+                    job = get_job(job_config)
+                    job.run()
+                print('Finished running all missing jobs. Re-running script should work now.')
+            exit()
 
     def all(self):
         table = pd.DataFrame({})
@@ -148,6 +143,7 @@ class EvalTable(object):
         with open(table_path, 'w+') as file:
             table_str = tabulate(self.table, tablefmt="pipe", headers="keys", showindex=False)
             file.write(table_str)
+        print('Finished creating table. Saved at {}'.format(table_path))
 
 
 @click.command()
@@ -169,7 +165,6 @@ def main(compare, hist, metric, schema, index, save):
         table.save(table_path=save)
 
     if hist:
-        print('entered hist')
         plot = EvalHist(
             schema_path=schema,
             metric=metric,
