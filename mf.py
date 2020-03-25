@@ -137,8 +137,8 @@ class UserItemSampler(object):
 
 
 class TrainEvalJob(object):
-    def __init__(self, index_path, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
-        self.index_path = index_path
+    def __init__(self, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
+        self.index_path = 'jobs/index.json'
         self.num_factors = num_factors
         self.lr = lr
         self.batch_size = batch_size
@@ -146,24 +146,24 @@ class TrainEvalJob(object):
         self.use_gpu = use_gpu
         self.override = override
 
-        if os.path.isfile(self.index_path):
-            self.index = json.load(open(self.index_path))
-        else:
-            self.index = {}
+        if not os.path.isfile(self.index_path):
+            json.dump({}, open(self.index_path, 'w+'))
+        self.index = json.load(open(self.index_path))
 
-        job_id_str = 'model:{} num_factors:{} lr:{} batch_size:{} num_epochs:{}'.\
-            format('mf', self.num_factors, self.lr, self.batch_size, self.num_epochs)
-
-        self.job_id = self.index[job_id_str] if job_id_str in self.index else len(self.index)
+        self.job_id_str = self.get_job_id_str()  # enables inheritance.
+        self.job_id = self.index[self.job_id_str] if self.job_id_str in self.index else len(self.index)
         self.job_dir = os.path.join('jobs', '{}'.format(self.job_id))
         self.checkpoints_dir = os.path.join(self.job_dir, 'checkpoints')
         self.results_path = os.path.join(self.job_dir, 'results.csv')
 
-        if job_id_str in self.index and self.override:
-            shutil.rmtree(self.job_dir)
-        else:
-            raise ValueError('Job {} already exists. Rerun job by setting override to TRUE'.format(job_id_str))
+        if self.job_id_str in self.index:
+            if self.override:
+                shutil.rmtree(self.job_dir)
+            else:
+                raise ValueError('Job {} already exists. Rerun job by setting override to TRUE'.format(self.job_id_str))
 
+        self.index[self.job_id_str] = self.job_id
+        json.dump(self.index, open(self.index_path, 'w+'), indent=4)
         os.makedirs(self.checkpoints_dir)
 
         # todo: if experiment doesn't finish - you need to have a status variable that says so.
@@ -178,7 +178,7 @@ class TrainEvalJob(object):
 
         try:
             print('Job initialized with device {}'.format(torch.cuda.get_device_name(self.device)))
-        except AssertionError:
+        except (AssertionError, ValueError):
             print('Job initialized with CPU.')
 
         self.dataset = datasets.get_data('ml-100k')
@@ -201,6 +201,11 @@ class TrainEvalJob(object):
         self.model.to(device=self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
         self.mse_loss = nn.MSELoss()
+
+    def get_job_id_str(self):
+        job_id_str = 'model:{} num_factors:{} lr:{} batch_size:{} num_epochs:{}'.\
+            format('mf', self.num_factors, self.lr, self.batch_size, self.num_epochs)
+        return job_id_str
 
     def reset_sampler(self, name='train'):
         if name == 'train':
@@ -301,24 +306,6 @@ class TrainEvalJob(object):
         checkpoint_path = os.path.join(self.checkpoints_dir, 'epoch_{}.ckpt'.format(current_epoch))
         torch.save(state, f=checkpoint_path)
 
-    def aggregate_stats(self):
-        results_df = pd.read_csv()
-        results_dict = results_df.to_dict(orient='list')
-        i, best_valid_loss = max(results_dict['valid_loss'])
-
-        record = {}
-        record['num_factors'] = [self.num_factors]
-
-        # select column that has maximum value.
-        # todo: add epoch column.
-        # train_loss, train_mse, valid_loss, valid_mse
-        # 2.372999906539917, 2.372999906539917, 0.8859999775886536, 0.8859999775886536
-        # 0.9226999878883362, 0.9226999878883362, 0.8830000162124634, 0.88300001621246
-
-        # best + median etc.
-        # also record data to jobs level (like: model + hyperparams.)
-        pass
-
     def run(self):
 
         for current_epoch in range(self.num_epochs):
@@ -332,20 +319,3 @@ class TrainEvalJob(object):
                 epoch_stats[k] = [epoch_valid_stats[k]]
             self.save_epoch_stats(epoch_stats)
             self.save_checkpoint(current_epoch)
-
-        self.aggregate_stats()
-
-
-def test():
-
-    job = TrainEvalJob(
-        job_id=0,
-        num_factors=4,
-        lr=0.01,
-        batch_size=256,
-        num_epochs=5,
-        use_gpu=False,
-        override=False
-    )
-
-    job.run()

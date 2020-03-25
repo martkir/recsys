@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import math
 import mf
+from torch import optim
 
 
 class FM(nn.Module):
@@ -36,8 +37,8 @@ class FM(nn.Module):
 
 
 class TrainEvalJob(mf.TrainEvalJob):
-    def __init__(self, index_path, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
-        super(TrainEvalJob, self).__init__(index_path, num_factors, lr, batch_size, num_epochs, use_gpu, override)
+    def __init__(self, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
+        super(TrainEvalJob, self).__init__(num_factors, lr, batch_size, num_epochs, use_gpu, override)
 
         self.model = FM(
             x_dim=len(self.train_partition.item_ids),
@@ -45,3 +46,11 @@ class TrainEvalJob(mf.TrainEvalJob):
             num_factors=self.num_factors
         )
         self.model.to(device=self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        self.mse_loss = nn.MSELoss()
+        # note: for inheritance optimizer and loss code is duplicated here. todo: clean this up.
+
+    def get_job_id_str(self):
+        job_id_str = 'model:{} num_factors:{} lr:{} batch_size:{} num_epochs:{}'.\
+            format('fm', self.num_factors, self.lr, self.batch_size, self.num_epochs)
+        return job_id_str
