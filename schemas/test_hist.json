@@ -1,0 +1,12 @@
+{
+    "mf": {
+        "job_configs": [
+            {"model": "mf", "num_factors": 4, "lr": 0.01, "batch_size": 256, "num_epochs": 2},
+            {"model": "mf", "num_factors": 5, "lr": 0.01, "batch_size": 256, "num_epochs": 2},
+            {"model": "mf", "num_factors": 6, "lr": 0.01, "batch_size": 256, "num_epochs": 2},
+            {"model": "mf", "num_factors": 7, "lr": 0.01, "batch_size": 256, "num_epochs": 2},
+            {"model": "mf", "num_factors": 8, "lr": 0.01, "batch_size": 256, "num_epochs": 2}
+        ],
+        "metrics": ["valid_mse"]
+    }
+}

@@ -1,0 +1,16 @@
+{
+    "fm": {
+        "job_configs": [
+            {"model": "fm", "num_factors": 4, "lr": 0.01, "batch_size": 256, "num_epochs": 2},
+            {"model": "fm", "num_factors": 4, "lr": 0.01, "batch_size": 256, "num_epochs": 3}
+        ],
+        "metrics": ["valid_mse"]
+    },
+    "mf": {
+        "job_configs": [
+            {"model": "mf", "num_factors": 4, "lr": 0.01, "batch_size": 256, "num_epochs": 2},
+            {"model": "mf", "num_factors": 4, "lr": 0.01, "batch_size": 256, "num_epochs": 5}
+        ],
+        "metrics": ["valid_mse"]
+    }
+}
