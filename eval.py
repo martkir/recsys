@@ -68,7 +68,6 @@ class EvalHist(object):
         print('Finished creating histogram. Saved at {}'.format(hist_path))
 
 
-
 class EvalTable(object):
     def __init__(self, schema_path, agg_option, metric, index_path):
         self.schema_path = schema_path
@@ -145,6 +144,9 @@ class EvalTable(object):
             file.write(table_str)
         print('Finished creating table. Saved at {}'.format(table_path))
 
+# python eval.py --compare all --metric valid_mse --schema schemas/test.json --save figs/table_all.md
+# python eval.py --compare best --metric valid_mse --schema schemas/test.json --save figs/table_best.md
+# python eval.py --hist 20 --metric valid_mse --schema schemas/hist_test.json --save figs/hist_test.png
 
 @click.command()
 @click.option('--compare', type=str)  # options: all, best.
