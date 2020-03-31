@@ -45,6 +45,7 @@ class TransFM(nn.Module):
             else:
                 z = torch.cat([u, x_prev, x_neg], dim=1)
 
+            terms[pol] = []
             vx = torch.matmul(z, self.V)  # (b, z_dim) * (z_dim, k) -> (b, k)
             tx = torch.matmul(z, self.T)  # (b, z_dim) * (z_dim, k) -> (b, k).
             z_sum = torch.sum(z, dim=1, keepdim=True)  # (b, z_dim) -> (b, 1).
@@ -56,7 +57,7 @@ class TransFM(nn.Module):
             term_1 = torch.mul(term_1_a, term_1_b)  # (b, 1).
             terms[pol].append(term_1)
 
-            term_2_a = z
+            term_2_a = z_sum
             term_2_b = torch.bmm(z.unsqueeze(1), tt).squeeze(2)
             term_2 = torch.mul(term_2_a, term_2_b)  # (b, 1)
             terms[pol].append(term_2)
@@ -64,13 +65,15 @@ class TransFM(nn.Module):
             term_3 = term_2
             terms[pol].append(term_3)
 
-            term_4_a = z # (b, 1).
+            term_4_a = z_sum # (b, 1).
             term_4_b = torch.bmm(z.unsqueeze(1), vt).squeeze(2)  # (b, 1, z_dim) * (b, z_dim, 1) -> (b, 1).
             term_4 = 2 * torch.mul(term_4_a, term_4_b)
             terms[pol].append(term_4)
 
             term_5 = 2 * torch.sum(torch.mul(vx, vx), dim=1, keepdim=True)  # -> (b, 1).
             terms[pol].append(term_5)
+
+            print('5: ', term_5.shape)
 
             # (b, 1, k) * (b, k, 1) -> (b, 1)
             term_6 = 2 * torch.bmm(tx.unsqueeze(1), vx.unsqueeze(2)).squeeze(2)
@@ -87,5 +90,21 @@ class TransFM(nn.Module):
 
 
 def test():
+    model = TransFM(
+        x_dim=10,
+        u_dim=10,
+        num_factors=3
+    )
 
-    pass
+    batch_size = 30
+    u_dim = 10
+    x_dim = 10
+
+    u = torch.randn(batch_size, u_dim)
+    x_prev = torch.randn(batch_size, x_dim)
+    x_pos = torch.randn(batch_size, x_dim)
+    x_neg = torch.randn(batch_size, x_dim)
+    pos_preds, neg_preds = model.forward(u, x_prev, x_pos, x_neg)
+    print(pos_preds.shape)
+
+test()
