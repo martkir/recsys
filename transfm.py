@@ -88,23 +88,3 @@ class TransFM(nn.Module):
 
         return preds['pos'], preds['neg']
 
-
-def test():
-    model = TransFM(
-        x_dim=10,
-        u_dim=10,
-        num_factors=3
-    )
-
-    batch_size = 30
-    u_dim = 10
-    x_dim = 10
-
-    u = torch.randn(batch_size, u_dim)
-    x_prev = torch.randn(batch_size, x_dim)
-    x_pos = torch.randn(batch_size, x_dim)
-    x_neg = torch.randn(batch_size, x_dim)
-    pos_preds, neg_preds = model.forward(u, x_prev, x_pos, x_neg)
-    print(pos_preds.shape)
-
-test()
