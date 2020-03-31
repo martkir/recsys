@@ -20,6 +20,55 @@ class Data(object):
                 self.obs.append((user_id, item_id_prev, item_id_pos))
 
 
+class Sampler(object):
+    def __init__(self, obs, user_ids, item_ids, device):
+        self.rels = iter(obs)
+        self.user_ids = user_ids
+        self.item_ids = item_ids
+        self.device = device
+        self.uid2idx = {user_id: i for i, user_id in enumerate(self.user_ids)}
+        self.xid2idx = {item_id: i for i, item_id in enumerate(self.item_ids)}
+        self.num_users = len(self.user_ids)
+        self.num_items = len(self.item_ids)
+        self._size = len(obs)
+        self.user_one_hot = torch.eye(self.num_users).to(device=self.device)
+        self.item_one_hot = torch.eye(self.num_items).to(device=self.device)
+
+    def __len__(self):
+        return self._size
+
+    def batch(self, batch_size=1):
+
+        while True:
+            u = []
+            x_prev = []
+            x_pos = []
+
+            for _ in range(batch_size):
+                try:
+                    user_id, prev_item_id, pos_item_id = next(self.rels)
+                    user_vec = self.user_one_hot[self.uid2idx[user_id]].reshape(1, self.user_one_hot.shape[1])
+                    prev_item_vec = self.item_one_hot[self.xid2idx[prev_item_id]].reshape(1, self.item_one_hot.shape[1])
+                    pos_item_vec = self.item_one_hot[self.xid2idx[pos_item_id]].reshape(1, self.item_one_hot.shape[1])
+                    u.append(user_vec)
+                    x_prev.append(prev_item_vec)
+                    x_pos.append(pos_item_vec)
+                except StopIteration:
+                    break
+
+            if len(u) > 0:
+                neg_indices = np.random.randint(0, len(self.item_ids), size=len(u))
+                x_neg = [self.item_one_hot[neg_item_idx] for neg_item_idx in neg_indices]
+                u = torch.cat(u, dim=0)
+                x_prev = torch.cat(x_prev, dim=0)
+                x_pos = torch.cat(x_pos, dim=0)
+                x_neg = torch.cat(x_neg, dim=0)
+                batch = (u, x_prev, x_pos, x_neg)
+                yield batch
+            else:
+                break
+
+
 class TransFM(nn.Module):
 
     def __init__(self, x_dim, u_dim, num_factors):
