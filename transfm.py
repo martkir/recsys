@@ -1,12 +1,23 @@
 import torch.nn as nn
 import torch
 import math
+import pandas as pd
+import numpy as np
 
 
-"""
-comp(u, x1) = dist(u + u', x1) -> but dist(x
-comp(u, x1), u * x2, x1 * x2
-"""
+class Data(object):
+    def __init__(self):
+        self.obs = []
+        df = pd.read_csv('data/rs_data/ml-100k/ratings.csv', sep=' ', names=['user', 'item', 'rating', 'time'])
+        user_ids = set(list(df['user']))
+        for user_id in user_ids:
+            df_user = df[df['user'] == user_id]
+            df_user = df_user.sort_values('time', ascending=True)  # oldest first.
+            items = np.array(df_user['item'])
+            for i in range(1, len(items)):
+                item_id_prev = items[i - 1]
+                item_id_pos = items[i]
+                self.obs.append((user_id, item_id_prev, item_id_pos))
 
 
 class TransFM(nn.Module):
@@ -72,8 +83,6 @@ class TransFM(nn.Module):
 
             term_5 = 2 * torch.sum(torch.mul(vx, vx), dim=1, keepdim=True)  # -> (b, 1).
             terms[pol].append(term_5)
-
-            print('5: ', term_5.shape)
 
             # (b, 1, k) * (b, k, 1) -> (b, 1)
             term_6 = 2 * torch.bmm(tx.unsqueeze(1), vx.unsqueeze(2)).squeeze(2)
