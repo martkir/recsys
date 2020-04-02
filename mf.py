@@ -45,48 +45,37 @@ class MF(nn.Module):
         return scores
 
 
+class Subset(object):
+    # data needed to sample.
+    def __init__(self):
+        self.user_ids = set()
+        self.item_ids = set()
+        self.obs = []
+
+    def add(self, user_id, item_id, rating):
+        self.obs.append((user_id, item_id, rating))
+        self.user_ids.add(user_id)
+        self.item_ids.add(item_id)
+
+
 class Partition(object):
-    def __init__(self, rels, dataset_type, split_prob, shuffle, seed=0):
-        self.rels = rels
-        self.dataset_type = dataset_type
+    # approach used to split data into train/ valid sets.
+    def __init__(self, obs, split_prob, shuffle, seed=0):
+        self.obs = obs
         self.split_prob = split_prob
         self.shuffle = shuffle
         self.seed = seed
         if self.shuffle:
             random.seed(self.seed)
-            random.shuffle(self.rels)
-
-        split_point = int(len(self.rels) * self.split_prob)
-        if self.dataset_type == 'train':
-            self.rels = self.rels[:split_point]
-        elif self.dataset_type == 'valid':
-            self.rels = self.rels[split_point:]
-        else:
-            raise ValueError('Invalid dataset type {}. Accepted values are train, valid.'.format(dataset_type))
-
-        self.user_ids = set()
-        self.item_ids = set()
-
-        for user_id, item_id, _ in self.rels:
-            self.user_ids.add(user_id)
-            self.item_ids.add(item_id)
-
-    def update(self, user_ids, item_ids):
-        self.user_ids = user_ids
-        self.item_ids = item_ids
-
-        i = 0
-        while True:
-            user_id, item_id, _ = self.rels[i]
-            if user_id not in self.user_ids:
-                del self.rels[i]
-                i -= 1
-            elif item_id not in self.item_ids:
-                del self.rels[i]
-                i -= 1
-            i += 1
-            if i == len(self.rels):
-                break
+            random.shuffle(self.obs)
+        split_point = int(len(self.obs) * self.split_prob)
+        self.train = Subset()
+        self.valid = Subset()
+        for user_id, item_id, rating in self.obs[:split_point]:
+            self.train.add(user_id, item_id, rating)
+        for user_id, item_id, rating in self.obs[split_point:]:
+            if user_id in self.train.user_ids and item_id in self.train.item_ids:
+                self.valid.add(user_id, item_id, rating)
 
 
 class UserItemSampler(object):
@@ -182,19 +171,11 @@ class TrainEvalJob(object):
             print('Job initialized with CPU.')
 
         self.dataset = datasets.get_data('ml-100k')
-        self.train_partition = Partition(self.dataset.rels, 'train', 0.8, shuffle=True, seed=0)
-        self.valid_partition = Partition(self.dataset.rels, 'valid', 0.8, shuffle=True, seed=0)
-
-        # Ensuring the validation set is a subset of the training set:
-        user_ids_diff = self.train_partition.user_ids - self.valid_partition.user_ids
-        user_ids_diff = user_ids_diff.union(self.train_partition.user_ids.intersection(self.valid_partition.user_ids))
-        item_ids_diff = self.train_partition.item_ids - self.valid_partition.item_ids
-        item_ids_diff = item_ids_diff.union(self.train_partition.item_ids.intersection(self.valid_partition.item_ids))
-        self.valid_partition.update(user_ids_diff, item_ids_diff)
+        self.partition = Partition(self.dataset.obs, split_prob=0.8, shuffle=True, seed=0)
 
         self.model = MF(
-            x_dim=len(self.train_partition.item_ids),
-            u_dim=len(self.train_partition.user_ids),
+            x_dim=len(self.partition.train.item_ids),
+            u_dim=len(self.partition.train.user_ids),
             num_factors=self.num_factors
         )
 
@@ -210,16 +191,16 @@ class TrainEvalJob(object):
     def reset_sampler(self, name='train'):
         if name == 'train':
             self.train_sampler = UserItemSampler(
-                rels=self.train_partition.rels,
-                user_ids=self.train_partition.user_ids,
-                item_ids=self.train_partition.item_ids,
+                rels=self.partition.train.obs,
+                user_ids=self.partition.train.user_ids,
+                item_ids=self.partition.train.item_ids,
                 device=self.device
             )
         elif name == 'valid':
             self.valid_sampler = UserItemSampler(
-                rels=self.valid_partition.rels,
-                user_ids=self.train_partition.user_ids,
-                item_ids=self.train_partition.item_ids,
+                rels=self.partition.valid.obs,
+                user_ids=self.partition.train.user_ids,
+                item_ids=self.partition.train.item_ids,
                 device=self.device
             )
         else:
