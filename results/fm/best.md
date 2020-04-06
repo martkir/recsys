@@ -1,0 +1,3 @@
+| model_name   | data_name   |   num_factors |   lr |   batch_size |   num_epochs | use_gpu   | override   |   train_loss |   train_mse |   valid_loss |   valid_mse |
+|:-------------|:------------|--------------:|-----:|-------------:|-------------:|:----------|:-----------|-------------:|------------:|-------------:|------------:|
+| fm           | ml-100k     |             4 | 0.01 |          256 |            2 | True      | False      |       1.0213 |      1.0213 |        1.013 |       1.013 |

@@ -16,7 +16,7 @@ class Jobs(object):
                 if self.index[k] not in valid_index_ids:
                     del self.index[k]
         else:
-            os.makedirs(self.index_path)
+            os.makedirs(os.path.dirname(self.index_path))
             self.index = {}
         json.dump(self.index, open(self.index_path, 'w+'))
 
@@ -51,6 +51,8 @@ class Jobs(object):
             job_dir = os.path.join('jobs/{}'.format(job_id))
             results_path = os.path.join(job_dir, 'results.csv')
             return results_path
+        else:
+            raise KeyError('Job with ID {} is not present in the index.'.format(job_id_str))
 
     def get_checkpoints_dir(self, job_id_str):
         if job_id_str in self.index:

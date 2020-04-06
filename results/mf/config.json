@@ -1,0 +1,4 @@
+[
+  {"model_name": "mf", "data_name": "ml-100k", "num_factors": 4, "lr": 0.01, "batch_size": 256, "num_epochs": 2, "use_gpu": true, "override": false},
+  {"model_name": "mf", "data_name": "ml-100k", "num_factors": 8, "lr": 0.01, "batch_size": 256, "num_epochs": 2, "use_gpu": true, "override": false}
+]

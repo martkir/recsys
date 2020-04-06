@@ -27,8 +27,8 @@ def set_device(use_gpu):
     return device
 
 
-def get_job_id_str(self, model_name, **kwargs):
-    return ' '.join(['model:{}'.format(model_name)] + ['{}:{}'.format(k, v) for k, v in kwargs.items()])
+def get_job_id_str(**kwargs):
+    return ' '.join(['{}:{}'.format(k, v) for k, v in kwargs.items()])
 
 
 def parse(df_ratings):

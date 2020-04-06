@@ -291,10 +291,11 @@ class UserItemMatrix(object):
 
 
 class TrainEvalJob(object):
-    def __init__(self, dataset_name, num_factors, lr, batch_size, num_epochs, lin_reg, emb_reg, trans_reg, partition_method,
-                 use_gpu=True, override=False):
+    def __init__(self, model_name, data_name, num_factors, lr, batch_size, num_epochs, lin_reg, emb_reg, trans_reg,
+                 partition_method, use_gpu=True, override=False):
 
-        self.dataset_name = dataset_name
+        self.model_name = model_name
+        self.data_name = data_name
         self.num_factors = num_factors
         self.lr = lr
         self.batch_size = batch_size
@@ -306,7 +307,7 @@ class TrainEvalJob(object):
         self.use_gpu = use_gpu
         self.override = override
 
-        self.job_id_str = get_job_id_str('transfm', **self.__dict__.copy())
+        self.job_id_str = get_job_id_str(**self.__dict__.copy())
         self.db_jobs = db.Jobs()
         if self.override:
             self.db_jobs.remove(self.job_id_str)
@@ -314,7 +315,7 @@ class TrainEvalJob(object):
         self.results_path = self.db_jobs.get_results_path(self.job_id_str)
         self.checkpoints_dir = self.db_jobs.get_checkpoints_dir(self.job_id_str)
         self.device = set_device(self.use_gpu)
-        data = db.Data(self.dataset_name)
+        data = db.Data(self.data_name)
         obs = parse(data.get_ratings(), partition_method=self.partition_method)
         self.partition = TransFMPartition(obs, self.partition_method)
         self.user_item_matrix = \

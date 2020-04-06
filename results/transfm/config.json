@@ -1,0 +1,16 @@
+[
+  {
+    "model_name": "transfm",
+    "data_name": "ml-100k",
+    "num_factors": 8,
+    "lr": 0.001,
+    "batch_size": 256,
+    "num_epochs":  2,
+    "lin_reg":  0,
+    "emb_reg":  0,
+    "trans_reg": 0,
+    "partition_method": "classic",
+    "use_gpu": true,
+    "override": false
+  }
+]
