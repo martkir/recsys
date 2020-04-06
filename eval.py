@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import json
 import click
 from tabulate import tabulate
+import db
 
 """
 tasks:
@@ -42,9 +43,12 @@ def get_job(job_config):
     if model == 'mf':
         import mf
         return mf.TrainEvalJob(**job_kwargs)
-    elif model == 'fm':
+    if model == 'fm':
         import fm
         return fm.TrainEvalJob(**job_kwargs)
+    elif model == 'transfm':
+        import transfm
+        return transfm.TrainEvalJob(**job_kwargs)
 
 
 class EvalHist(object):
@@ -75,10 +79,7 @@ class EvalTable(object):
         self.metric = metric
         self.index_path = index_path
         self.schema = json.load(open(self.schema_path, 'r'))
-        try:
-            self.index = json.load(open(self.index_path, 'r'))
-        except FileNotFoundError:
-            self.index = {}
+        self.jobs_db = db.Jobs()
         self.check()
         self.table = None
 
@@ -87,7 +88,7 @@ class EvalTable(object):
         for model in self.schema.keys():
             for job_config in self.schema[model]['job_configs']:
                 job_config_str = ' '.join(['{}:{}'.format(k, v) for k, v in job_config.items()])
-                if job_config_str not in self.index:
+                if job_config_str not in self.jobs_db.index:
                     missing_jobs.append(job_config)
 
         if len(missing_jobs) > 0:
@@ -110,7 +111,7 @@ class EvalTable(object):
         table = pd.DataFrame({})
         for model in self.schema.keys():
             for job_config in self.schema[model]['job_configs']:
-                job_id = self.index[get_job_str(job_config)]
+                job_id = self.jobs_db.index[get_job_str(job_config)]
                 results = pd.read_csv('jobs/{}/results.csv'.format(job_id))
                 best_result = results.nsmallest(1, self.metric).reset_index(drop=True)  # ensure index is 0.
                 row = pd.DataFrame({hparam: [v] for hparam, v in job_config.items()})
@@ -123,7 +124,7 @@ class EvalTable(object):
         for model in self.schema.keys():
             model_table = pd.DataFrame({})
             for job_config in self.schema[model]['job_configs']:
-                job_id = self.index[get_job_str(job_config)]
+                job_id = self.jobs_db.index[get_job_str(job_config)]
                 results = pd.read_csv('jobs/{}/results.csv'.format(job_id))
                 best_result = results.nsmallest(1, self.metric).reset_index(drop=True)  # ensure index is 0.
                 row = pd.DataFrame({hparam: [v] for hparam, v in job_config.items()})
@@ -147,6 +148,8 @@ class EvalTable(object):
 # python eval.py --compare all --metric valid_mse --schema schemas/test.json --save figs/table_all.md
 # python eval.py --compare best --metric valid_mse --schema schemas/test.json --save figs/table_best.md
 # python eval.py --hist 20 --metric valid_mse --schema schemas/hist_test.json --save figs/hist_test.png
+# python eval.py --compare all --metric valid_loss --schema schemas/transfm.json --save figs/transfm_table_all.md
+
 
 @click.command()
 @click.option('--compare', type=str)  # options: all, best.

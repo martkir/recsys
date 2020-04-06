@@ -10,6 +10,8 @@ import random
 from collections import defaultdict
 from collections import OrderedDict
 import db
+from mf import get_job_id_str
+from mf import set_device
 
 
 def parse(df, partition_method='transfm'):
@@ -304,14 +306,14 @@ class TrainEvalJob(object):
         self.use_gpu = use_gpu
         self.override = override
 
-        self.job_id_str = self.get_job_id_str('transfm', **self.__dict__.copy())
+        self.job_id_str = get_job_id_str('transfm', **self.__dict__.copy())
         self.db_jobs = db.Jobs()
         if self.override:
             self.db_jobs.remove(self.job_id_str)
         self.db_jobs.add(self.job_id_str)
         self.results_path = self.db_jobs.get_results_path(self.job_id_str)
         self.checkpoints_dir = self.db_jobs.get_checkpoints_dir(self.job_id_str)
-        self.set_device()
+        self.device = set_device(self.use_gpu)
         data = db.Data(self.dataset_name)
         obs = parse(data.get_ratings(), partition_method=self.partition_method)
         self.partition = TransFMPartition(obs, self.partition_method)
@@ -329,21 +331,6 @@ class TrainEvalJob(object):
         self.sbpr_loss = SBPRLoss(self.lin_reg, self.emb_reg, self.trans_reg)
 
         print('finished init job.')
-
-    def set_device(self):
-        self.device = torch.device('cpu')
-        if self.use_gpu:
-            if not torch.cuda.is_available():
-                raise Exception('CUDA capable GPU not available.')
-            else:
-                self.device = torch.device('cuda:{}'.format(0))
-        try:
-            print('Job initialized with device {}'.format(torch.cuda.get_device_name(self.device)))
-        except (AssertionError, ValueError):
-            print('Job initialized with CPU.')
-
-    def get_job_id_str(self, model_name, **kwargs):
-        return ' '.join(['model:{}'.format(model_name)] + ['{}:{}'.format(k, v) for k, v in kwargs.items()])
 
     def reset_sampler(self, name='train'):
         if name == 'train':

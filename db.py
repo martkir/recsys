@@ -67,12 +67,12 @@ class Data(object):
         if not os.path.isdir(self.root_dir):
             os.makedirs(self.root_dir)
         try:
-            present = set(next(os.walk('data/rs_data'))[1])
+            present = set(next(os.walk('data/rs_data'))[1])  # e.g. ml-100k, ml-1m
         except StopIteration:
             present = set()
         if self.name not in present:
             datasets.create(self.name, self.root_dir)
 
     def get_ratings(self):
-        path = 'data/rs_data/{}/ratings.csv'.format(self.name)  # todo: change to ratings.csv
+        path = 'data/rs_data/{}/ratings.csv'.format(self.name)
         return pd.read_csv(path, sep=',')

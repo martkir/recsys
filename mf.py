@@ -1,7 +1,6 @@
 __author__ = 'mbarutchiyska'
 
 import os
-import shutil
 from collections import defaultdict, OrderedDict
 
 import torch
@@ -11,8 +10,35 @@ from tqdm import tqdm
 import numpy as np
 import pandas as pd
 import random
-import datasets
-import json
+import db
+
+
+def set_device(use_gpu):
+    device = torch.device('cpu')
+    if use_gpu:
+        if not torch.cuda.is_available():
+            raise Exception('CUDA capable GPU not available.')
+        else:
+            device = torch.device('cuda:{}'.format(0))
+    try:
+        print('Job initialized with device {}'.format(torch.cuda.get_device_name(device)))
+    except (AssertionError, ValueError):
+        print('Job initialized with CPU.')
+    return device
+
+
+def get_job_id_str(self, model_name, **kwargs):
+    return ' '.join(['model:{}'.format(model_name)] + ['{}:{}'.format(k, v) for k, v in kwargs.items()])
+
+
+def parse(df_ratings):
+    # ratings are df header = user_id,item_id,rating,time
+    # output: [(user_id, item_id, rating)]
+    obs = []
+    records = df_ratings.to_dict(orient='records')
+    for record in records:
+        obs.append((record['user_id'], record['item_id'], record['rating']))
+    return obs
 
 
 class BatchDotProduct(nn.Module):
@@ -80,7 +106,7 @@ class Partition(object):
 
 class UserItemSampler(object):
     def __init__(self, rels, user_ids, item_ids, device):
-        self.rels = iter(rels)
+        self.obs = iter(rels)
 
         self.user_ids = user_ids
         self.item_ids = item_ids
@@ -106,7 +132,7 @@ class UserItemSampler(object):
 
             for _ in range(batch_size):
                 try:
-                    user_id, item_id, rel = next(self.rels)
+                    user_id, item_id, rel = next(self.obs)
                     user_vec = self.user_matrix[self.uid2idx[user_id]].reshape(1, self.user_matrix.shape[1])
                     item_vec = self.item_matrix[self.xid2idx[item_id]].reshape(1, self.item_matrix.shape[1])
                     u.append(user_vec)
@@ -126,53 +152,28 @@ class UserItemSampler(object):
 
 
 class TrainEvalJob(object):
-    def __init__(self, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
-        self.index_path = 'jobs/index.json'
+    def __init__(self, model_name, data_name, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
+        self.model_name = model_name  # note: adding model name easier for inheritance.
+        self.data_name = data_name
         self.num_factors = num_factors
         self.lr = lr
         self.batch_size = batch_size
         self.num_epochs = num_epochs
         self.use_gpu = use_gpu
         self.override = override
+        self.job_id_str = get_job_id_str(**self.__dict__.copy())
 
-        if not os.path.isfile(self.index_path):
-            json.dump({}, open(self.index_path, 'w+'))
-        self.index = json.load(open(self.index_path))
+        self.db_jobs = db.Jobs()
+        if self.override:
+            self.db_jobs.remove(self.job_id_str)
+        self.db_jobs.add(self.job_id_str)
+        self.results_path = self.db_jobs.get_results_path(self.job_id_str)
+        self.checkpoints_dir = self.db_jobs.get_checkpoints_dir(self.job_id_str)
+        self.device = set_device(self.use_gpu)
 
-        self.job_id_str = self.get_job_id_str()  # enables inheritance.
-        self.job_id = self.index[self.job_id_str] if self.job_id_str in self.index else len(self.index)
-        self.job_dir = os.path.join('jobs', '{}'.format(self.job_id))
-        self.checkpoints_dir = os.path.join(self.job_dir, 'checkpoints')
-        self.results_path = os.path.join(self.job_dir, 'results.csv')
-
-        if self.job_id_str in self.index:
-            if self.override:
-                shutil.rmtree(self.job_dir)
-            else:
-                raise ValueError('Job {} already exists. Rerun job by setting override to TRUE'.format(self.job_id_str))
-
-        self.index[self.job_id_str] = self.job_id
-        json.dump(self.index, open(self.index_path, 'w+'), indent=4)
-        os.makedirs(self.checkpoints_dir)
-
-        # todo: if experiment doesn't finish - you need to have a status variable that says so.
-        # allows unfinished experiments to be overriden.
-
-        self.device = torch.device('cpu')
-        if self.use_gpu:
-            if not torch.cuda.is_available():
-                raise Exception('CUDA capable GPU not available.')
-            else:
-                self.device = torch.device('cuda:{}'.format(0))
-
-        try:
-            print('Job initialized with device {}'.format(torch.cuda.get_device_name(self.device)))
-        except (AssertionError, ValueError):
-            print('Job initialized with CPU.')
-
-        self.dataset = datasets.get_data('ml-100k')
-        self.partition = Partition(self.dataset.obs, split_prob=0.8, shuffle=True, seed=0)
-
+        data = db.Data(self.data_name)
+        obs = parse(data.get_ratings())  # [(user_id, item_id, rating)]
+        self.partition = Partition(obs, split_prob=0.8, shuffle=True, seed=0)
         self.model = MF(
             x_dim=len(self.partition.train.item_ids),
             u_dim=len(self.partition.train.user_ids),
@@ -182,11 +183,6 @@ class TrainEvalJob(object):
         self.model.to(device=self.device)
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
         self.mse_loss = nn.MSELoss()
-
-    def get_job_id_str(self):
-        job_id_str = 'model:{} num_factors:{} lr:{} batch_size:{} num_epochs:{}'.\
-            format('mf', self.num_factors, self.lr, self.batch_size, self.num_epochs)
-        return job_id_str
 
     def reset_sampler(self, name='train'):
         if name == 'train':

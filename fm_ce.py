@@ -3,7 +3,6 @@ __author__ = 'mbarutchiyska'
 import torch
 import torch.nn as nn
 from torch import optim
-import math
 import mf
 import fm
 
@@ -34,8 +33,8 @@ class FMCE(fm.FM):
 
 
 class UserItemSampler(mf.UserItemSampler):
-    def __init__(self, rels, user_ids, item_ids, device):
-        super(UserItemSampler, self).__init__(rels, user_ids, item_ids, device)
+    def __init__(self, obs, user_ids, item_ids, device):
+        super(UserItemSampler, self).__init__(obs, user_ids, item_ids, device)
 
     def batch(self, batch_size=1):
 
@@ -46,7 +45,7 @@ class UserItemSampler(mf.UserItemSampler):
 
             for _ in range(batch_size):
                 try:
-                    user_id, item_id, rel = next(self.rels)
+                    user_id, item_id, rel = next(self.obs)
                     rel = 1 if rel > 0 else 0  # ensure cross entropy is possible.
                     user_vec = self.user_matrix[self.uid2idx[user_id]].reshape(1, self.user_matrix.shape[1])
                     item_vec = self.item_matrix[self.xid2idx[item_id]].reshape(1, self.item_matrix.shape[1])
@@ -67,12 +66,13 @@ class UserItemSampler(mf.UserItemSampler):
 
 
 class TrainEvalJob(mf.TrainEvalJob):
-    def __init__(self, index_path, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
-        super(TrainEvalJob, self).__init__(index_path, num_factors, lr, batch_size, num_epochs, use_gpu, override)
+    def __init__(self, model_name, data_name, num_factors, lr, batch_size, num_epochs, use_gpu=True, override=False):
+        super(TrainEvalJob, self).__init__(model_name, data_name, num_factors, lr, batch_size, num_epochs, use_gpu,
+                                           override)
 
         self.model = FMCE(
-            x_dim=len(self.train_partition.item_ids),
-            u_dim=len(self.train_partition.user_ids),
+            x_dim=len(self.partition.train.item_ids),
+            u_dim=len(self.partition.train.user_ids),
             num_factors=self.num_factors
         )
 
@@ -91,16 +91,16 @@ class TrainEvalJob(mf.TrainEvalJob):
     def reset_sampler(self, name='train'):
         if name == 'train':
             self.train_sampler = UserItemSampler(
-                rels=self.train_partition.rels,
-                user_ids=self.train_partition.user_ids,
-                item_ids=self.train_partition.item_ids,
+                obs=self.partition.obs,
+                user_ids=self.partition.train.user_ids,
+                item_ids=self.partition.train.item_ids,
                 device=self.device
             )
         elif name == 'valid':
             self.valid_sampler = UserItemSampler(
-                rels=self.valid_partition.rels,
-                user_ids=self.train_partition.user_ids,
-                item_ids=self.train_partition.item_ids,
+                obs=self.partition.valid.obs,
+                user_ids=self.partition.train.user_ids,
+                item_ids=self.partition.train.item_ids,
                 device=self.device
             )
         else:
