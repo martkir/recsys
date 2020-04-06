@@ -11,6 +11,9 @@ def create(name, rs_dir_path):
     if name == 'ml-100k':
         d = MovieLens100k(rs_dir_path)
         d.create()
+    if name == 'ml-1m':
+        d = MovieLens1m(rs_dir_path)
+        d.create()
 
 
 class MovieLens100k(object):
